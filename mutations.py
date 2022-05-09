@@ -3,13 +3,11 @@ import numpy as np
 
 from numpy.random import choice
 from itertools import combinations
-
-from scipy.special import softmax
 from scipy.stats import tmean
 
 
 class Mutator:
-    def __init__(self, ds, stat, few=0.03, lot=0.9, sigma=0.02, min_size=4, eps=1e-5, use_best=True):
+    def __init__(self, ds, stat, few=0.02, lot=0.09, sigma=0.02, min_size=2, eps=1e-5, use_best=True):
         self.ds, self.stat, self.dist, self.best = ds, stat, stat.dist, use_best
         self.eps, self.min_size = eps, min_size
         self.few, self.lot, self.sigma = few, lot, sigma
@@ -17,13 +15,15 @@ class Mutator:
             self.far_split, self.half_split, self.triple_split,
             self.new_prototype_by_centroid, self.new_prototype_by_prototype,
             self.delete_by_centroid, self.delete_by_prototype,
-            self.merge_by_centroid, self.merge_by_prototype,
+            self.merge_by_centroid, self.merge_by_prototype, self.merge_by_global_mst,
             self.move_few_from_cluster_by_centroid, self.move_lot_from_cluster_by_centroid,
-            self.move_few_from_cluster_by_prototype, self.move_lot_from_cluster_by_prototype,
+            #self.move_few_from_cluster_by_prototype, self.move_lot_from_cluster_by_prototype,
+            # self.move_single_by_centroid,
             self.move_few_rate_by_centroid, self.move_lot_rate_by_centroid,
-            self.move_lot_rate_by_prototype, self.move_lot_rate_by_prototype,
+            #self.move_single_by_prototype, self.move_lot_rate_by_prototype, self.move_lot_rate_by_prototype,
+            # self.expand_single_by_centroid,
             self.expand_few_by_centroid, self.expand_lot_by_centroid,
-            self.expand_few_by_prototype, self.expand_lot_by_prototype
+            #self.expand_single_by_prototype, self.expand_few_by_prototype, self.expand_lot_by_prototype
         ]
 
     def _norm(self, rates):
@@ -136,6 +136,18 @@ class Mutator:
     #         del new_clusters[merger]
     #         new_clusters[acc].extend(clusters[merger])
     #     return new_clusters
+
+    def merge_by_global_mst(self, clusters, labels):
+        bridges = list(filter(lambda mst_edge: labels[mst_edge[0]] != labels[mst_edge[1]], self.stat.global_mst))
+        bridge_rates = [1.0 / (1.0 + self.dist(self.ds[x], self.ds[y])) for x, y in bridges]
+        bridge_idx = np.argmax(bridge_rates) if self.best else choice(len(bridges), p=self._norm(bridge_rates))
+        x, y = bridges[bridge_idx]
+        m1, m2 = labels[x], labels[y]
+
+        new_clusters = copy.deepcopy(clusters)
+        del new_clusters[max(m1, m2)]
+        new_clusters[min(m1, m2)].extend(clusters[max(m1, m2)])
+        return new_clusters
 
     def merge_by_prototype(self, clusters, labels):
         return self._merge_by_pivots(clusters, self.stat.get_prototypes(clusters))
@@ -276,7 +288,7 @@ class Mutator:
 
     def _move_by_rate(self, labels, p, pivots):
         rates = list(zip(range(len(labels)), self._p_rates(labels, pivots)))
-        move_size = int(len(labels) * p)
+        move_size = max(1, int(len(labels) * p))
         rates.sort(key=lambda r: r[1], reverse=True)
         movers, _ = zip(*rates)
         new_labels = copy.deepcopy(labels)
@@ -287,11 +299,17 @@ class Mutator:
             new_labels[p_idx] = new_label
         return self.stat.split_by_clusters(new_labels)
 
+    def move_single_by_centroid(self, clusters, labels):
+        return self._move_by_rate(labels, 0.0, self.stat.get_centroids(clusters))
+
     def move_few_rate_by_centroid(self, clusters, labels):
         return self._move_by_rate(labels, self._sample_p(self.few), self.stat.get_centroids(clusters))
 
     def move_lot_rate_by_centroid(self, clusters, labels):
         return self._move_by_rate(labels, self._sample_p(self.lot), self.stat.get_centroids(clusters))
+
+    def move_single_by_prototype(self, clusters, labels):
+        return self._move_by_rate(labels, 0.0, self.stat.get_prototypes(clusters))
 
     def move_few_rate_by_prototype(self, clusters, labels):
         return self._move_by_rate(labels, self._sample_p(self.few), self.stat.get_prototypes(clusters))
@@ -338,6 +356,9 @@ class Mutator:
         new_clusters[e_idx].extend(clusters[e_idx])
         return new_clusters
 
+    def expand_single_by_centroid(self, clusters, labels):
+        return self._expand_by_pivots(clusters, labels, 0.0, self.stat.get_centroids(clusters))
+
     def expand_few_by_centroid(self, clusters, labels):
         p, pivots = self._sample_p(self.few), self.stat.get_centroids(clusters)
         return self._expand_by_pivots(clusters, labels, p, pivots)
@@ -345,6 +366,9 @@ class Mutator:
     def expand_lot_by_centroid(self, clusters, labels):
         p, pivots = self._sample_p(self.lot), self.stat.get_centroids(clusters)
         return self._expand_by_pivots(clusters, labels, p, pivots)
+
+    def expand_single_by_prototype(self, clusters, labels):
+        return self._expand_by_pivots(clusters, labels, 0.0, self.stat.get_prototypes(clusters))
 
     def expand_few_by_prototype(self, clusters, labels):
         p, pivots = self._sample_p(self.few), self.stat.get_prototypes(clusters)

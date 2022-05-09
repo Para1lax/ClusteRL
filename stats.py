@@ -5,6 +5,7 @@ from numba import njit
 class ClusterStat:
     def __init__(self, ds):
         self.ds = ds
+        self.global_mst = self._build_mst(np.arange(len(ds), dtype=int))
 
     @staticmethod
     @njit
@@ -82,6 +83,26 @@ class ClusterStat:
         pivots[label] = self_dist
         return self_dist, 1.0 / (1.0 + other_dist)
 
+    def _build_mst(self, cluster):
+        n, used, mst = len(cluster), np.zeros(len(cluster), dtype=int), list()
+        min_e, sel_e = np.full(n, float('inf')), np.full(n, -1, dtype=int)
+        for i in range(n):
+            v = -1
+            for j in range(n):
+                if used[j] == 0 and (v == -1 or min_e[j] < min_e[v]):
+                    v = j
+            used[v] = 1
+            if sel_e[v] != -1:
+                mst.append((v, sel_e[v]))
+            for to in range(n):
+                d = self.dist(self.ds[cluster[v]], self.ds[cluster[to]])
+                if d < min_e[to]:
+                    min_e[to], sel_e[to] = d, v
+        return mst
+
+    def build_mst(self, clusters):
+        return [self._build_mst(cluster) for cluster in clusters]
+
     def calc_metrics(self, labels):
         # laplacian = np.zeros(shape=(len(self.ds), len(self.ds)))
         # for p_idx, label in enumerate(labels):
@@ -94,14 +115,14 @@ class ClusterStat:
         #     laplacian[p_idx, p_idx] = sum_affinity
         # eigen, _ = np.linalg.eigh(laplacian)
         clusters = self.split_by_clusters(labels)
-        centroids = self.get_centroids(clusters)
-        prototypes = self.get_prototypes(clusters, centroids=centroids)
+        # centroids = self.get_centroids(clusters)
+        prototypes = self.get_prototypes(clusters)
         dist_metrics = list()
         for p_idx, label in enumerate(labels):
-            cent_dists = self.dists_point_to_pivots(p_idx, centroids)
-            self_cent, other_cent = self.get_self_other(label, cent_dists)
+            # cent_dists = self.dists_point_to_pivots(p_idx, centroids)
+            # self_cent, other_cent = self.get_self_other(label, cent_dists)
             prot_dists = self.dists_point_to_pivots(p_idx, prototypes)
             self_prot, other_prot = self.get_self_other(label, prot_dists)
-            dist_metrics.extend([self_cent, self_prot, other_cent, other_prot])
+            dist_metrics.extend([self_prot, other_prot])
         return np.array(dist_metrics)
         # return np.concatenate([eigen, np.array(dist_metrics)])

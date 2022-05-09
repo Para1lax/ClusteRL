@@ -3,17 +3,37 @@ import pandas as pd
 
 from sklearn.preprocessing import normalize
 
+from executor import Executor
 from mutations import Mutator
 from stats import ClusterStat
-from executor import Executor
 
 
-ds = pd.read_csv('datasets/vehicle.csv', header=None)
+DS_NAME, MEASURE_FUN = 'steel-plates-fault', 'silhouette'
+BUDGET, GRID, LAUNCHES = 10, 5, 2
+
+
+def dump(ds, timestamps, launches):
+    dumper = {
+        "dataset": DS_NAME,
+        "shape": ds.shape,
+        "measure_fun": MEASURE_FUN,
+        "timestamps": list(timestamps),
+        "launches": list()
+    }
+    for measures, partition in launches:
+        dumper['launches'].append({"measures": list(measures), "best_partition": list(partition)})
+    return dumper
+
+
+ds = pd.read_csv(f'datasets/{DS_NAME}.csv', header=None)
 ds = normalize(np.unique(ds, axis=0), axis=0)
-BUDGET, GRID, LAUNCHES = 500, 50, 5
 stat, stamps = ClusterStat(ds), np.linspace(BUDGET / GRID, BUDGET, GRID)
-mutator = Mutator(ds, stat, use_best=False)
-executor = Executor(ds, stat, mutator, measure='sil', attempts=64, lam=8, gamma=0.9)
+mutator = Mutator(ds, stat, min_size=2, use_best=False)
+executor = Executor(ds, stat, mutator, measure=MEASURE_FUN, attempts=50, lam=4, gamma=0.95, amount=4)
 
-results = np.array([executor.launch(stamps) for _ in range(LAUNCHES)])
-pd.DataFrame(results, columns=stamps).to_csv('results/vehicle_sil.csv')
+results = list()
+for launch in range(LAUNCHES):
+    vals, labs, fit = executor.launch(stamps)
+    results.append((vals, labs))
+with open(f'results/{DS_NAME}/rl_results.dict', 'w') as fp:
+    fp.write(dump(ds, stamps, results).__str__())
