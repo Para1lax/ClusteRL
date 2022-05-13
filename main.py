@@ -8,8 +8,8 @@ from mutations import Mutator
 from stats import ClusterStat
 
 
-DS_NAME, MEASURE_FUN = 'steel-plates-fault', 'silhouette'
-BUDGET, GRID, LAUNCHES = 10, 5, 2
+DS_NAME, MEASURE_FUN = 'vehicle', 'calinski_harabasz'
+BUDGET, GRID, LAUNCHES = 200, 40, 2
 
 
 def dump(ds, timestamps, launches):
@@ -35,5 +35,6 @@ results = list()
 for launch in range(LAUNCHES):
     vals, labs, fit = executor.launch(stamps)
     results.append((vals, labs))
-with open(f'results/{DS_NAME}/rl_results.dict', 'w') as fp:
+print(dump(ds, stamps, results).__str__())
+with open(f'{DS_NAME}_rl_results.dict', 'w') as fp:
     fp.write(dump(ds, stamps, results).__str__())

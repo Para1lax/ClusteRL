@@ -52,7 +52,10 @@ class Executor:
     def single_step(self, agent, metrics, labels):
         policy, samples = agent.calc_policy(metrics), list()
         arms = np.random.choice(len(policy), size=self.amount, replace=False, p=policy)
-        new_clusters = [self.mutator(labels, arm) for arm in arms]
+        clusters = self.stat.split_by_clusters(labels)
+        centroids = self.stat.get_centroids(clusters)
+        prototypes = self.stat.get_prototypes(clusters, centroids)
+        new_clusters = [self.mutator(arm, labels, clusters, centroids, prototypes) for arm in arms]
         for arm_idx, partition in enumerate(new_clusters):
             if partition is not None:
                 new_labs = self.stat.unite_by_labels(partition)
@@ -68,14 +71,16 @@ class Executor:
         used_arms = list()
         for idx, metrics in enumerate(inputs):
             policy, labs, new_metrics, fits, arms = self.single_step(agent, metrics, labels[idx])
+            next_gen = None
             if arms is not None:
                 agent.backprop(metrics, new_metrics, arms, fits - fitness[idx])
                 next_gen = np.argmax(fits)
-                labels[idx], fitness[idx], inputs[idx] = labs[next_gen], fits[next_gen], new_metrics[next_gen]
-                used_arms.extend(arms)
-            else:
+            if next_gen is None or fits[next_gen] == fitness[idx]:
                 labels[idx], fitness[idx] = self.init_single()
                 inputs[idx] = self.stat.calc_metrics(labels[idx])
+            else:
+                labels[idx], fitness[idx], inputs[idx] = labs[next_gen], fits[next_gen], new_metrics[next_gen]
+                used_arms.extend(arms)
         return used_arms
 
     def launch(self, stamps):
