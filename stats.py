@@ -12,16 +12,6 @@ class ClusterStat:
     def dist(x, y):
         return np.linalg.norm(x - y)
 
-    def get_centroids_by_labels(self, labels):
-        lab_max = np.max(labels)
-        centroids = [np.zeros(self.ds.shape[1]) for _ in range(lab_max + 1)]
-        counts = np.zeros(lab_max + 1, int)
-        for p_idx, lab in enumerate(labels):
-            cur_sum = centroids[lab] * counts[lab] + self.ds[p_idx]
-            counts[lab] += 1
-            centroids[lab] = cur_sum / counts[lab]
-        return centroids
-
     def get_centroids(self, clusters):
         return [sum([self.ds[idx] for idx in cl]) / len(cl) if len(cl) != 0 else None for cl in clusters]
 
@@ -68,14 +58,6 @@ class ClusterStat:
     def dists_point_to_pivots(self, p_idx, pivots):
         return [self.dist(self.ds[p_idx], centroid) for centroid in pivots]
 
-    def dists_to_clusters(self, centroids, major='cluster'):
-        if major == 'cluster':
-            return [[self.dist(self.ds[idx], centroid) for idx in range(len(self.ds))] for centroid in centroids]
-        elif major == 'point':
-            return [[self.dist(self.ds[idx], centroid) for centroid in centroids] for idx in range(len(self.ds))]
-        else:
-            raise ValueError(f"Expected 'cluster' or 'point', got {major}")
-
     def get_self_other(self, label, pivots):
         self_dist = pivots[label]
         pivots[label] = float('inf')
@@ -104,25 +86,11 @@ class ClusterStat:
         return [self._build_mst(cluster) for cluster in clusters]
 
     def calc_metrics(self, labels):
-        # laplacian = np.zeros(shape=(len(self.ds), len(self.ds)))
-        # for p_idx, label in enumerate(labels):
-        #     sum_affinity = 0
-        #     for p_other, other_label in enumerate(labels):
-        #         if label == other_label and p_idx != p_other:
-        #             aff = 1.0 / (1e-8 + self.dist(self.ds[p_idx], self.ds[p_other]))
-        #             laplacian[p_idx, p_other] = -aff
-        #             sum_affinity += aff
-        #     laplacian[p_idx, p_idx] = sum_affinity
-        # eigen, _ = np.linalg.eigh(laplacian)
         clusters = self.split_by_clusters(labels)
-        # centroids = self.get_centroids(clusters)
         prototypes = self.get_prototypes(clusters)
         dist_metrics = list()
         for p_idx, label in enumerate(labels):
-            # cent_dists = self.dists_point_to_pivots(p_idx, centroids)
-            # self_cent, other_cent = self.get_self_other(label, cent_dists)
             prot_dists = self.dists_point_to_pivots(p_idx, prototypes)
             self_prot, other_prot = self.get_self_other(label, prot_dists)
             dist_metrics.extend([self_prot, other_prot])
         return np.array(dist_metrics)
-        # return np.concatenate([eigen, np.array(dist_metrics)])

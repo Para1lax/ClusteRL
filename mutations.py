@@ -7,9 +7,8 @@ from scipy.stats import tmean
 
 
 class Mutator:
-    def __init__(self, ds, stat, few=0.02, lot=0.09, sigma=0.02, min_size=2, eps=1.0, use_best=True):
+    def __init__(self, ds, stat, few=0.02, lot=0.09, sigma=0.02, use_best=False):
         self.ds, self.stat, self.dist, self.best = ds, stat, stat.dist, use_best
-        self.eps, self.min_size = eps, min_size
         self.few, self.lot, self.sigma = few, lot, sigma
         self.mutations = [
             self.far_split, self.half_split, self.triple_split,
@@ -17,13 +16,8 @@ class Mutator:
             self.delete_by_centroid, self.delete_by_prototype,
             self.merge_by_centroid, self.merge_by_prototype, self.merge_by_global_mst,
             self.move_few_from_cluster_by_centroid, self.move_lot_from_cluster_by_centroid,
-            #self.move_few_from_cluster_by_prototype, self.move_lot_from_cluster_by_prototype,
-            # self.move_single_by_centroid,
             self.move_few_rate_by_centroid, self.move_lot_rate_by_centroid,
-            #self.move_single_by_prototype, self.move_lot_rate_by_prototype, self.move_lot_rate_by_prototype,
-            # self.expand_single_by_centroid,
             self.expand_few_by_centroid, self.expand_lot_by_centroid,
-            #self.expand_single_by_prototype, self.expand_few_by_prototype, self.expand_lot_by_prototype
         ]
 
     def _norm(self, rates):
@@ -36,34 +30,6 @@ class Mutator:
 
     def _sample_p(self, mean):
         return np.random.uniform(mean - self.sigma, mean + self.sigma)
-
-    # def _clean_delete(self, clusters, deleter_idx, centroids):
-    #     deleter = clusters[deleter_idx]
-    #     del clusters[deleter_idx], centroids[deleter_idx]
-    #     for p_idx in deleter:
-    #         p_dists = self.stat.dists_point_to_pivots(p_idx, centroids)
-    #         new_label = np.argmin(p_dists)
-    #         clusters[new_label].append(p_idx)
-    #     return clusters
-
-    def clean_clusters(self, clusters):
-        if clusters is None:
-            return None
-        clusters = list(filter(lambda cluster: len(cluster) != 0, clusters))
-        # centroids = self.stat.get_centroids(clusters)
-        # removable_clusters = list()
-        # for idx, cl in enumerate(clusters):
-        #     if len(cl) < self.min_size:
-        #         removable_clusters.append(idx)
-        # if len(removable_clusters) == 0:
-        #     return clusters
-        # temp_cluster = list()
-        # for idx in reversed(removable_clusters):
-        #     temp_cluster.extend(clusters[idx])
-        #     del clusters[idx], centroids[idx]
-        # clusters.append(temp_cluster), centroids.append(None)
-        # self._clean_delete(clusters, len(clusters) - 1, centroids)
-        return None if len(clusters) < 2 else clusters
 
     def _get_farthest(self, spliterator, centroid):
         far_idx = spliterator[self.stat.dist_to_pivot_(spliterator, centroid, np.argmax)]
@@ -121,23 +87,6 @@ class Mutator:
                 new_clusters[-1].append(p)
         return new_clusters
 
-    def _merge_rate(self, centroids, indices):
-        return sum([self.dist(centroids[x], centroids[y]) for x, y in combinations(indices, 2)])
-
-    # def _merge(self, clusters, k_merge):
-    #     if len(clusters) <= k_merge:
-    #         return None
-    #     centroids, comb = self.stat.get_centroids(clusters), combinations(range(len(clusters)), k_merge)
-    #     dists = [(self._merge_rate(centroids, indices), indices) for indices in comb]
-    #     rates = [1.0 / (self.eps + d[0]) for d in dists]
-    #     m_idx = np.argmax(rates) if self.best else choice(len(rates), p=self._norm(rates))
-    #     mergers = list(sorted(dists[m_idx][1], reverse=True))
-    #     new_clusters, acc = copy.deepcopy(clusters), mergers[-1]
-    #     for merger in mergers[:-1]:
-    #         del new_clusters[merger]
-    #         new_clusters[acc].extend(clusters[merger])
-    #     return new_clusters
-
     def merge_by_global_mst(self, **kwargs):
         clusters, labels = kwargs['clusters'], kwargs['labels']
         bridges = list(filter(lambda mst_edge: labels[mst_edge[0]] != labels[mst_edge[1]], self.stat.global_mst))
@@ -151,24 +100,24 @@ class Mutator:
         new_clusters[min(m1, m2)].extend(clusters[max(m1, m2)])
         return new_clusters
 
-    def merge_by_prototype(self, **kwargs):
-        return self._merge_by_pivots(kwargs['clusters'], kwargs['prototypes'])
-
-    def merge_by_centroid(self, **kwargs):
-        return self._merge_by_pivots(kwargs['clusters'], kwargs['centroids'])
-
     def _merge_by_pivots(self, clusters, pivots):
         if len(clusters) <= 2:
             return None
         comb = combinations(range(len(pivots)), 2)
         dists = [(self.dist(pivots[p1], pivots[p2]), (p1, p2)) for p1, p2 in comb]
-        rates = [1.0 / (self.eps + d[0]) for d in dists]
+        rates = [1.0 / (1.0 + d[0]) for d in dists]
         m_idx = np.argmax(rates) if self.best else choice(len(rates), p=self._norm(rates))
         m1, m2 = dists[m_idx][1]
         new_clusters = copy.deepcopy(clusters)
         del new_clusters[m2]
         new_clusters[m1].extend(clusters[m2])
         return new_clusters
+
+    def merge_by_prototype(self, **kwargs):
+        return self._merge_by_pivots(kwargs['clusters'], kwargs['prototypes'])
+
+    def merge_by_centroid(self, **kwargs):
+        return self._merge_by_pivots(kwargs['clusters'], kwargs['centroids'])
 
     def _delete_by_pivot(self, clusters, pivots):
         if len(clusters) <= 2:
@@ -192,33 +141,6 @@ class Mutator:
 
     def delete_by_prototype(self, **kwargs):
         return self._delete_by_pivot(kwargs['clusters'], kwargs['prototypes'])
-
-    # def _delete(self, clusters, k_delete):
-    #     if len(clusters) <= k_delete + 1:
-    #         return None
-    #     centroids, rates = self.stat.get_centroids(clusters), list()
-    #     p = (self.few + self.lot) / 2
-    #     dists = self.stat.sorted_dists_to_pivots(clusters, centroids)
-    #     for sort_dists in dists:
-    #         p_idx = self._idx(sort_dists, p)
-    #         rates.append(tmean(sort_dists[:p_idx]))
-    #     if self.best:
-    #         temp = sorted(zip(rates, range(len(rates))), key=lambda r: r[0], reverse=True)
-    #         _, deletes = zip(*temp[:k_delete])
-    #         deletes = list(deletes)
-    #     else:
-    #         deletes = choice(len(rates), k_delete, replace=False, p=self._norm(rates)).tolist()
-    #
-    #     deletes.sort(reverse=True)
-    #     new_clusters, removers = copy.deepcopy(clusters), list()
-    #     for del_idx in deletes:
-    #         removers.extend(clusters[del_idx])
-    #         del new_clusters[del_idx], centroids[del_idx]
-    #     for p_idx in removers:
-    #         p_dists = self.stat.dists_point_to_pivots(p_idx, centroids)
-    #         new_label = np.argmin(p_dists)
-    #         new_clusters[new_label].append(p_idx)
-    #     return new_clusters
 
     def _move_by_pivot(self, clusters, p, pivots):
         dists_indices, rates = self.stat.sorted_dists_to_pivots(clusters, pivots, idx=True), list()
@@ -247,40 +169,11 @@ class Mutator:
             new_clusters[-1].append(p_idx)
         return new_clusters
 
-    # def _move(self, clusters, p):
-    #     centroids, rates = self.stat.get_centroids(clusters), list()
-    #     dists_indices = self.stat.sorted_dists_to_pivots(clusters, centroids, idx=True)
-    #     for sort_dists in dists_indices:
-    #         p_idx = self._idx(sort_dists, p)
-    #         dists, _ = zip(*sort_dists)
-    #         rates.append(tmean(list(dists)[p_idx:]))
-    #     m_idx = np.argmax(rates) if self.best else choice(len(rates), p=self._norm(rates))
-    #
-    #     _, movers = zip(*dists_indices[m_idx])
-    #     movers, q_idx = list(movers), self._idx(movers, p)
-    #     new_clusters = copy.deepcopy(clusters)
-    #     del new_clusters[m_idx], centroids[m_idx]
-    #     for p_idx in movers[q_idx:]:
-    #         p_dists = self.stat.dists_point_to_pivots(p_idx, centroids)
-    #         # rates = [1.0 / (self.eps + d) for d in p_dists]
-    #         new_label = np.argmin(p_dists)
-    #         new_clusters[new_label].append(p_idx)
-    #     new_clusters.append(list())
-    #     for p_idx in movers[:q_idx]:
-    #         new_clusters[-1].append(p_idx)
-    #     return new_clusters
-
     def move_few_from_cluster_by_centroid(self, **kwargs):
         return self._move_by_pivot(kwargs['clusters'], self._sample_p(self.few), kwargs['centroids'])
 
     def move_lot_from_cluster_by_centroid(self, **kwargs):
         return self._move_by_pivot(kwargs['clusters'], self._sample_p(self.lot), kwargs['centroids'])
-
-    def move_few_from_cluster_by_prototype(self, **kwargs):
-        return self._move_by_pivot(kwargs['clusters'], self._sample_p(self.few), kwargs['prototypes'])
-
-    def move_lot_from_cluster_by_prototype(self, **kwargs):
-        return self._move_by_pivot(kwargs['clusters'], self._sample_p(self.lot), kwargs['prototypes'])
 
     def _p_rates(self, labels, pivots):
         rates = list()
@@ -311,12 +204,6 @@ class Mutator:
     def move_lot_rate_by_centroid(self, **kwargs):
         return self._move_by_rate(kwargs['labels'], self._sample_p(self.lot), kwargs['centroids'])
 
-    def move_few_rate_by_prototype(self, **kwargs):
-        return self._move_by_rate(kwargs['labels'], self._sample_p(self.few), kwargs['prototypes'])
-
-    def move_lot_rate_by_prototype(self, **kwargs):
-        return self._move_by_rate(kwargs['labels'], self._sample_p(self.lot), kwargs['prototypes'])
-
     def _new_prototype_by_pivot(self, clusters, labels, pivots):
         p_best = np.argmax(self._p_rates(labels, pivots))
         new_clusters = [list() for _ in range(len(clusters) + 1)]
@@ -338,7 +225,7 @@ class Mutator:
         rates, dists = list(), self.stat.sorted_dists_to_pivots(clusters, pivots, idx=True)
         for sort_dists in dists:
             rate = 0.0 if len(sort_dists) < 2 else tmean(sort_dists[:self._idx(sort_dists, p)])
-            rates.append(1.0 / (rate + self.eps))
+            rates.append(1.0 / (1.0 + rate))
         e_idx = np.argmax(rates) if self.best else choice(len(rates), p=self._norm(rates))
         others = list(filter(lambda idx: labels[idx] != e_idx, range(len(self.ds))))
         if len(others) < 2:
@@ -367,18 +254,14 @@ class Mutator:
             kwargs['clusters'], kwargs['labels'], self._sample_p(self.lot), kwargs['centroids']
         )
 
-    def expand_few_by_prototype(self, **kwargs):
-        return self._expand_by_pivots(
-            kwargs['clusters'], kwargs['labels'], self._sample_p(self.few), kwargs['prototypes']
-        )
-
-    def expand_lot_by_prototype(self, **kwargs):
-        return self._expand_by_pivots(
-            kwargs['clusters'], kwargs['labels'], self._sample_p(self.lot), kwargs['prototypes']
-        )
-
     def __call__(self, arm, labels, clusters, centroids, prototypes):
         new_gen = self.mutations[arm].__call__(
             labels=labels, clusters=clusters, centroids=centroids, prototypes=prototypes
         )
         return self.clean_clusters(new_gen)
+
+    def clean_clusters(self, clusters):
+        if clusters is None:
+            return None
+        clusters = list(filter(lambda cluster: len(cluster) != 0, clusters))
+        return None if len(clusters) < 2 else clusters
